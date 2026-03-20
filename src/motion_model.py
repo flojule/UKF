@@ -25,6 +25,24 @@ def motion_model(prior: State, control: Control) -> State:
     return posterior
 
 
+def motion_model_batch(X_np: np.ndarray, control: Control) -> np.ndarray:
+    ''' vectorized motion model: X_np is (N, 3), returns (N, 3) '''
+    thetas = X_np[:, 2]
+    Y = np.empty_like(X_np)
+    if control.omega == 0:
+        Y[:, 0] = X_np[:, 0] + control.v * np.cos(thetas) * control.dt
+        Y[:, 1] = X_np[:, 1] + control.v * np.sin(thetas) * control.dt
+        Y[:, 2] = thetas
+    else:
+        v_over_w = control.v / control.omega
+        dtheta = control.omega * control.dt
+        Y[:, 0] = X_np[:, 0] + v_over_w * (np.sin(thetas + dtheta) - np.sin(thetas))
+        Y[:, 1] = X_np[:, 1] + v_over_w * (np.cos(thetas) - np.cos(thetas + dtheta))
+        Y[:, 2] = thetas + dtheta
+    Y[:, 2] = (Y[:, 2] + math.pi) % (2 * math.pi) - math.pi # normalize angles
+    return Y
+
+
 def dead_reckoning(state_0: State, ds_Control: list) -> list:
     ''' dead reckoning implementation, loops motion model, returns list of states '''
     DR_State = []

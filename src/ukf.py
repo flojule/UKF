@@ -2,37 +2,34 @@ import math
 
 import numpy as np
 
-from models import State, Control, Measurement, Landmark
-from motion_model import motion_model, normalize_angle
-from measurement_model import measurement_model
+from models import State, Control
+from motion_model import motion_model_batch, normalize_angle
+from measurement_model import measurement_model_batch
 
 DEBUG = False  # set to True for verbose per-step output
 
 
-def ukf(prior: State, control: Control, measurements: list, ds_Landmark_GroundTruth: list,
+def ukf(prior: State, control: Control, measurements: list, landmark_dict: dict,
         Q, R, weights_mean, weights_cov, alpha, kappa, beta) -> State:
     ''' Unscented Kalman Filter implementation '''
     # Prediction step
-    X_np = generate_sigma_points(prior, alpha, kappa, beta) # X are the sigma points, numpy array
-    Y = [motion_model(State(x=sp), control) for sp in X_np] # Y are the propagated sigma points
-    Y_np = np.array([sp.x for sp in Y]) # convert object to numpy array
-    y_mean, Pyy = compute_mean_and_covariance(Y_np, Q, weights_mean, weights_cov) # same weights for mean and covariance
+    X_np = generate_sigma_points(prior, alpha, kappa, beta) # X are the sigma points, (2n+1, 3)
+    Y_np = motion_model_batch(X_np, control) # propagate all sigma points at once, (2n+1, 3)
+    y_mean, Pyy = compute_mean_and_covariance(Y_np, Q, weights_mean, weights_cov)
 
     # Correction step
     posterior = None
     if len(measurements) > 0:
         for measurement in measurements:
-            Y_np = generate_sigma_points(State(x=y_mean, P=Pyy), alpha, kappa, beta) # new sigma points around predicted mean
-            Y = [State(x=sp, P=Pyy) for sp in Y_np]
-            if measurement.id in [landmark_.id for landmark_ in ds_Landmark_GroundTruth]: # if measurement id not in landmark ground truth, return prediction as posterior
-                landmark = [landmark_ for landmark_ in ds_Landmark_GroundTruth if landmark_.id == measurement.id][0] # landmark corresponding to measurement
-                Z = [measurement_model(sp, landmark) for sp in Y] # Z are the estimated measurement sigma points (list of Measurement objects)
-                Z_np = np.array([m_est.z for m_est in Z]) # extract the measurement arrays from the Measurement objects
+            Y_np = generate_sigma_points(State(x=y_mean, P=Pyy), alpha, kappa, beta) # new sigma points around predicted mean, (2n+1, 3)
+            landmark = landmark_dict.get(measurement.id)
+            if landmark is not None: # if measurement id not in landmark ground truth, return prediction as posterior
+                Z_np = measurement_model_batch(Y_np, landmark) # estimated measurement sigma points, (2n+1, 2)
 
                 z_mean, Pzz = compute_mean_and_covariance(Z_np, R, weights_mean, weights_cov) # same weights for mean and covariance
 
                 Pyz = compute_cross_covariance(Y_np, y_mean, Z_np, z_mean, weights_cov) # cross covariance
-                K = Pyz @ np.linalg.inv(Pzz) # Kalman gain
+                K = np.linalg.solve(Pzz.T, Pyz.T).T # Kalman gain (solve is faster and more stable than inv)
                 innovation = measurement.z - z_mean # measurement innovation
                 innovation[-1] = normalize_angle(innovation[-1])
                 x = y_mean + K @ innovation
@@ -107,21 +104,16 @@ def compute_mean_and_covariance(Y, Q, weights_mean, weights_cov):
     mean = np.sum(weights_mean[:, None] * Y, axis=0)
     mean[-1] = math.atan2(np.sum(weights_mean * np.sin(Y[:, -1])), np.sum(weights_mean * np.cos(Y[:, -1]))) # theta, bearing
 
-    cov = Q.copy()
-    for i in range(Y.shape[0]):
-        dy = Y[i] - mean
-        dy[-1] = normalize_angle(dy[-1])
-        cov += weights_cov[i] * np.outer(dy, dy)
+    dy = Y - mean
+    dy[:, -1] = (dy[:, -1] + math.pi) % (2 * math.pi) - math.pi # normalize angles (vectorized)
+    cov = Q.copy() + np.einsum('i,ij,ik->jk', weights_cov, dy, dy)
     return mean, cov
 
 
 def compute_cross_covariance(Y, y_mean, Z, z_mean, weights_cov):
     ''' compute cross covariance between state sigma points Y and measurement sigma points Z '''
-    cross_cov = np.zeros((Y.shape[1], Z.shape[1]))
-    for i in range(Y.shape[0]):
-        dy = Y[i] - y_mean
-        dz = Z[i] - z_mean
-        dy[-1] = normalize_angle(dy[-1])
-        dz[-1] = normalize_angle(dz[-1])
-        cross_cov += weights_cov[i] * np.outer(dy, dz)
-    return cross_cov
+    dy = Y - y_mean
+    dz = Z - z_mean
+    dy[:, -1] = (dy[:, -1] + math.pi) % (2 * math.pi) - math.pi # normalize angles (vectorized)
+    dz[:, -1] = (dz[:, -1] + math.pi) % (2 * math.pi) - math.pi
+    return np.einsum('i,ij,ik->jk', weights_cov, dy, dz)

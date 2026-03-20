@@ -112,9 +112,8 @@ def plot_state_errors(ds_GroundTruth, list_States, labels, colors):
             states_ = [states[j].x[i] for j in range(T)]
             ax[i, 0].plot(t, states_, label=labels[s+1], color=colors[s+1], alpha=alpha)
 
-            errors = np.array([[states[i].x[j] - ds_GroundTruth[i].x[j] for j in range(3)] for i in range(T)])
-            if i == 2: # normalize angle error
-                errors[:, i] = np.array([normalize_angle(errors[j, i]) for j in range(T)])
+            errors = np.array([states[k].x - ds_GroundTruth[k].x for k in range(T)]) # T x 3, computed once per state
+            errors[:, 2] = (errors[:, 2] + np.pi) % (2 * np.pi) - np.pi # normalize angle error (vectorized)
             ax[i, 1].plot(t, errors[:, i], label=labels[s+1], color=colors[s+1], alpha=alpha)
             ax[i, 2].plot([state.t for state in states if state.measurement is not None],
                           [state.Kinnovation[i] for state in states if state.measurement is not None],
@@ -141,6 +140,7 @@ def plot_innovation(list_States, labels, colors):
     fig, ax = plt.subplots(2, 2, figsize=(20, 10), sharex=True)
     labels_measurement = ['Range (m)', 'Bearing (rad)']
     labels_error = ['Range innovation (m)', 'Bearing innovation (rad)']
+    labels = list(labels) # avoid mutating caller's list
     labels[0] = "Expected"
 
     alpha = 0.6 if len(list_States) > 1 else 1.0

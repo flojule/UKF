@@ -112,20 +112,26 @@ def main():
                             normalize_angle(state_00.x[2] + stddev_02x2)])
         state_0_ = [state_00, state_00, state_00] # update to [state_00, state_01, state_02] to test different starting points
 
+        # Pre-index landmarks and measurements for O(1) lookup in the UKF loop
+        landmark_dict = {lm.id: lm for lm in ds_Landmark_GroundTruth}
+        meas_by_time = {}
+        for m in ds_Measurement:
+            meas_by_time.setdefault(round(m.t, 2), []).append(m)
+
         ds_Predicted = [] # add list of predicted states to this list
         labels = ["Ground truth"] # add labels with UKF ID to this list
 
         for (P, Q, R, alpha, state_0) in zip(P_, Q_, R_, alpha_, state_0_): # grid search over parameters
-            state_0.P = P
+            init_state = State(t=state_0.t, x=state_0.x.copy(), P=P) # avoid mutating shared state_0 object
             weights_mean, weights_cov = compute_weights(3, alpha, kappa, beta) # n=3 for (x, y, theta)
 
             # q7 --- UKF loop ---
             UKF_State = []
-            UKF_State.append(state_0)
+            UKF_State.append(init_state)
             for control in ds_Control: # first measurement happens at t=11.12
                 prior = UKF_State[-1]
-                measurements = [measurement for measurement in ds_Measurement if abs(measurement.t - control.t) < 0.01] # find all measurements at this time step
-                posterior = ukf(prior, control, measurements, ds_Landmark_GroundTruth, Q, R, weights_mean, weights_cov, alpha, kappa, beta) # accounts for no measurements if list is empty
+                measurements = meas_by_time.get(round(control.t, 2), []) # O(1) lookup
+                posterior = ukf(prior, control, measurements, landmark_dict, Q, R, weights_mean, weights_cov, alpha, kappa, beta) # accounts for no measurements if list is empty
                 UKF_State.append(posterior)
 
             if DEBUG:
@@ -161,7 +167,7 @@ def main():
             bearing_errors.append(abs(normalize_angle(state.x[2] - myUKF[t].x[2])))
 
         avg_distance_error = np.mean(distance_errors)
-        avg_bearing_error = math.atan2(np.mean(np.sin(bearing_errors)), np.mean(np.cos(bearing_errors)))
+        avg_bearing_error = np.mean(bearing_errors) # bearing_errors are absolute values in [0, pi], plain mean is correct
 
         print(f"Average distance error: {avg_distance_error:.3f} m")
         print(f"Average bearing error: {avg_bearing_error:.3f} rad")

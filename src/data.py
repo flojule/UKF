@@ -27,11 +27,10 @@ def import_data(i, dt=None, export=False, robot_id=False):
     ds_GroundTruth = [State(t=row[0], x=[row[1], row[2], row[3]]) for row in ds_GroundTruth_raw] # convert into list of State objects
     ds_Landmark_GroundTruth = [Landmark(row[0], [row[1], row[2]], [row[3], row[4]]) for row in ds_Landmark_GroundTruth_raw] # convert into list of Landmark objects
 
+    barcode_to_id = {int(row[1]): int(row[0]) for row in ds_Barcodes}
     for measurement in ds_Measurement:
-        for j in range(len(ds_Barcodes)):
-            if ds_Barcodes[j][1] == measurement.id:
-                measurement.id = int(ds_Barcodes[j][0]) # replace barcode with id
-                break
+        if measurement.id in barcode_to_id:
+            measurement.id = barcode_to_id[measurement.id] # replace barcode with id
 
     if robot_id:
         robot_id = get_robot_id(ds_Measurement, ds_Barcodes)

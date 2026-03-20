@@ -1,7 +1,19 @@
 import math
 
+import numpy as np
+
 from models import State, Landmark, Measurement
 from motion_model import normalize_angle
+
+
+def measurement_model_batch(X_np: np.ndarray, landmark: Landmark) -> np.ndarray:
+    ''' vectorized measurement model: X_np is (N, 3), returns (N, 2) as [[range, bearing], ...] '''
+    dx = landmark.x[0] - X_np[:, 0]
+    dy = landmark.x[1] - X_np[:, 1]
+    ranges = np.hypot(dx, dy)
+    bearings = np.arctan2(dy, dx) - X_np[:, 2]
+    bearings = (bearings + math.pi) % (2 * math.pi) - math.pi # normalize angles
+    return np.column_stack((ranges, bearings))
 
 
 def measurement_model(state: State, landmark: Landmark) -> Measurement:
